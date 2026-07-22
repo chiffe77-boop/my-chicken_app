@@ -1,6 +1,9 @@
 import streamlit as st
 import requests
 import pandas as pd
+import re
+from collections import Counter
+import plotly.express as px
 from urllib.parse import urlparse, parse_qs
 
 # =========================================================
@@ -81,6 +84,24 @@ def fetch_comments(video_id: str, api_key: str):
 
 
 # =========================================================
+# 댓글 목록에서 단어를 뽑아 빈도수 상위 20개를 세는 함수
+# - 한글/영문/숫자 등 '글자'를 기준으로 단어를 나눔 (특수문자, 이모지 등은 구분자로 취급)
+# - 한 글자짜리 단어는 통계에서 제외
+# =========================================================
+def count_top_words(comment_list, top_n=20):
+    counter = Counter()
+
+    for text in comment_list:
+        # \w+ : 문자/숫자로 이루어진 덩어리를 단어로 인식 (한글도 포함됨)
+        words = re.findall(r"\w+", text, flags=re.UNICODE)
+        for word in words:
+            if len(word) > 1:  # 한 글자짜리 단어는 제외
+                counter[word] += 1
+
+    return counter.most_common(top_n)
+
+
+# =========================================================
 # 예시 버튼을 눌렀을 때 입력창 값을 바꿔주기 위한 콜백 함수들
 # (버튼 클릭 -> session_state 값 변경 -> 입력창에 반영)
 # =========================================================
@@ -155,3 +176,34 @@ if analyze:
 
                 # 댓글 표로 보여주기
                 st.dataframe(df, use_container_width=True, hide_index=True)
+
+                # -----------------------------------------------
+                # 자주 나온 단어 TOP 20 그래프
+                # -----------------------------------------------
+                st.subheader("📊 자주 나온 단어 TOP 20")
+
+                top_words = count_top_words(df["댓글"].tolist(), top_n=20)
+
+                if not top_words:
+                    st.info("분석할 단어가 없어요. (한 글자짜리 단어는 제외돼요)")
+                else:
+                    word_df = pd.DataFrame(top_words, columns=["단어", "빈도수"])
+
+                    # 그래프에서 가장 많이 나온 단어가 위쪽에 오도록,
+                    # 빈도수가 낮은 순으로 정렬해서 데이터를 넣어줌 (가로 막대그래프는 아래에서부터 쌓임)
+                    word_df = word_df.sort_values(by="빈도수", ascending=True)
+
+                    fig = px.bar(
+                        word_df,
+                        x="빈도수",
+                        y="단어",
+                        orientation="h",
+                        text="빈도수",
+                    )
+                    fig.update_layout(
+                        yaxis_title="",
+                        xaxis_title="언급 횟수",
+                        height=600,
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
