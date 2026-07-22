@@ -4,6 +4,7 @@ import pandas as pd
 import re
 from collections import Counter
 import plotly.express as px
+from wordcloud import WordCloud
 from urllib.parse import urlparse, parse_qs
 
 # =========================================================
@@ -84,11 +85,12 @@ def fetch_comments(video_id: str, api_key: str):
 
 
 # =========================================================
-# 댓글 목록에서 단어를 뽑아 빈도수 상위 20개를 세는 함수
+# 댓글 목록에서 단어별 빈도수를 세는 함수
 # - 한글/영문/숫자 등 '글자'를 기준으로 단어를 나눔 (특수문자, 이모지 등은 구분자로 취급)
 # - 한 글자짜리 단어는 통계에서 제외
+# - 단어 빈도 그래프(2단계)와 워드클라우드(3단계)에서 공통으로 사용
 # =========================================================
-def count_top_words(comment_list, top_n=20):
+def build_word_freq(comment_list):
     counter = Counter()
 
     for text in comment_list:
@@ -98,7 +100,34 @@ def count_top_words(comment_list, top_n=20):
             if len(word) > 1:  # 한 글자짜리 단어는 제외
                 counter[word] += 1
 
-    return counter.most_common(top_n)
+    return counter
+
+
+def count_top_words(comment_list, top_n=20):
+    return build_word_freq(comment_list).most_common(top_n)
+
+
+# =========================================================
+# 워드클라우드에 쓸 한글 폰트를 인터넷에서 내려받는 함수
+# - 스트림릿 클라우드에는 한글 폰트가 기본으로 없어서, 미리 나눔고딕 폰트 파일을 받아둠
+# - @st.cache_resource : 앱이 켜져있는 동안 한 번만 내려받고 재사용 (매번 다시 받지 않도록)
+# =========================================================
+FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+FONT_PATH = "NanumGothic-Regular.ttf"
+
+@st.cache_resource
+def get_font_path():
+    try:
+        response = requests.get(FONT_URL, timeout=10)
+        response.raise_for_status()  # 응답이 200이 아니면 에러 발생시킴
+
+        with open(FONT_PATH, "wb") as f:
+            f.write(response.content)
+
+        return FONT_PATH
+    except Exception:
+        # 다운로드 실패 시 None을 돌려줘서, 호출하는 쪽에서 안내 메시지를 띄우게 함
+        return None
 
 
 # =========================================================
@@ -207,3 +236,29 @@ if analyze:
                     )
 
                     st.plotly_chart(fig, use_container_width=True)
+
+                # -----------------------------------------------
+                # 워드클라우드 그림
+                # -----------------------------------------------
+                st.subheader("☁️ 댓글 워드클라우드")
+
+                font_path = get_font_path()
+
+                if font_path is None:
+                    st.error("😥 한글 폰트를 내려받지 못해서 워드클라우드를 만들 수 없어요. 잠시 후 다시 시도해주세요.")
+                else:
+                    word_freq = build_word_freq(df["댓글"].tolist())
+
+                    if not word_freq:
+                        st.info("워드클라우드로 그릴 단어가 없어요. (한 글자짜리 단어는 제외돼요)")
+                    else:
+                        wordcloud = WordCloud(
+                            font_path=font_path,
+                            background_color="white",  # 배경 흰색
+                            width=1000,
+                            height=600,
+                        ).generate_from_frequencies(word_freq)
+
+                        # matplotlib 없이 바로 이미지(PIL Image)로 변환해서 화면에 띄움
+                        wordcloud_image = wordcloud.to_image()
+                        st.image(wordcloud_image, use_container_width=True)
